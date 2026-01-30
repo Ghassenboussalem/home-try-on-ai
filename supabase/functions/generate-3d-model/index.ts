@@ -7,6 +7,13 @@ const corsHeaders = {
 
 const TRIPO_API_URL = "https://api.tripo3d.ai/v2/openapi";
 
+interface TripoUploadResponse {
+  code: number;
+  data: {
+    image_token: string;
+  };
+}
+
 interface TripoTaskResponse {
   code: number;
   data: {
@@ -32,8 +39,61 @@ interface TripoTaskStatus {
   };
 }
 
-async function createTripoTask(apiKey: string, imageUrl: string): Promise<string> {
-  console.log("Creating Tripo task for image:", imageUrl);
+async function fetchImageAsBlob(imageUrl: string): Promise<{ blob: Blob; fileType: string }> {
+  console.log("Fetching image from URL:", imageUrl);
+  
+  const response = await fetch(imageUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status}`);
+  }
+  
+  const contentType = response.headers.get("content-type") || "image/jpeg";
+  const blob = await response.blob();
+  
+  // Determine file type from content-type
+  let fileType = "jpg";
+  if (contentType.includes("png")) {
+    fileType = "png";
+  } else if (contentType.includes("webp")) {
+    fileType = "webp";
+  }
+  
+  console.log(`Image fetched: ${blob.size} bytes, type: ${fileType}`);
+  return { blob, fileType };
+}
+
+async function uploadImageToTripo(apiKey: string, imageBlob: Blob): Promise<string> {
+  console.log("Uploading image to Tripo...");
+  
+  const formData = new FormData();
+  formData.append("file", imageBlob, "image.jpg");
+  
+  const response = await fetch(`${TRIPO_API_URL}/upload`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Tripo upload failed:", response.status, errorText);
+    throw new Error(`Failed to upload image to Tripo: ${response.status}`);
+  }
+
+  const data: TripoUploadResponse = await response.json();
+  console.log("Tripo upload response:", data);
+  
+  if (data.code !== 0) {
+    throw new Error(`Tripo upload error: ${data.code}`);
+  }
+
+  return data.data.image_token;
+}
+
+async function createTripoTask(apiKey: string, imageToken: string, fileType: string): Promise<string> {
+  console.log("Creating Tripo task with image_token:", imageToken);
   
   const response = await fetch(`${TRIPO_API_URL}/task`, {
     method: "POST",
@@ -43,9 +103,10 @@ async function createTripoTask(apiKey: string, imageUrl: string): Promise<string
     },
     body: JSON.stringify({
       type: "image_to_model",
+      model_version: "v2.5-20250123",
       file: {
-        type: "url",
-        url: imageUrl,
+        type: fileType,
+        file_token: imageToken,
       },
     }),
   });
@@ -85,7 +146,6 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
 
     const data: TripoTaskStatus = await response.json();
     console.log(`Task status (attempt ${attempt + 1}):`, data.data.status, data.data.progress);
-    console.log("Full response data:", JSON.stringify(data.data));
 
     if (data.data.status === "success") {
       // Try different paths for the model URL based on API response structure
@@ -103,11 +163,11 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
 
     if (data.data.status === "failed") {
       console.error("Task failed:", JSON.stringify(data.data));
-      throw new Error("Tripo task failed");
+      throw new Error("Tripo task failed - the image may not be suitable for 3D conversion");
     }
 
-    // Wait 2 seconds before next poll
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Wait 3 seconds before next poll
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
   throw new Error("Task timed out after maximum attempts");
@@ -138,10 +198,16 @@ serve(async (req) => {
     console.log(`Generating 3D model for: ${productName || "Unknown product"}`);
     console.log(`Image URL: ${imageUrl}`);
 
-    // Create the task
-    const taskId = await createTripoTask(TRIPO_API_KEY, imageUrl);
+    // Step 1: Fetch the image
+    const { blob, fileType } = await fetchImageAsBlob(imageUrl);
     
-    // Poll for completion
+    // Step 2: Upload to Tripo to get image_token
+    const imageToken = await uploadImageToTripo(TRIPO_API_KEY, blob);
+    
+    // Step 3: Create the task with the image_token
+    const taskId = await createTripoTask(TRIPO_API_KEY, imageToken, fileType);
+    
+    // Step 4: Poll for completion
     const modelUrl = await pollTaskStatus(TRIPO_API_KEY, taskId);
 
     return new Response(
