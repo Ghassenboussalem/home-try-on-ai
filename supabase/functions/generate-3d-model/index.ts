@@ -20,8 +20,14 @@ interface TripoTaskStatus {
     status: string;
     progress: number;
     output?: {
-      model?: string;
+      pbr_model?: string;
       rendered_image?: string;
+    };
+    result?: {
+      pbr_model?: {
+        type: string;
+        url: string;
+      };
     };
   };
 }
@@ -47,7 +53,7 @@ async function createTripoTask(apiKey: string, imageUrl: string): Promise<string
   if (!response.ok) {
     const errorText = await response.text();
     console.error("Tripo task creation failed:", response.status, errorText);
-    throw new Error(`Failed to create Tripo task: ${response.status}`);
+    throw new Error(`Failed to create Tripo task: ${response.status} - ${errorText}`);
   }
 
   const data: TripoTaskResponse = await response.json();
@@ -79,13 +85,24 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
 
     const data: TripoTaskStatus = await response.json();
     console.log(`Task status (attempt ${attempt + 1}):`, data.data.status, data.data.progress);
+    console.log("Full response data:", JSON.stringify(data.data));
 
-    if (data.data.status === "success" && data.data.output?.model) {
-      console.log("Task completed! Model URL:", data.data.output.model);
-      return data.data.output.model;
+    if (data.data.status === "success") {
+      // Try different paths for the model URL based on API response structure
+      const modelUrl = data.data.output?.pbr_model || 
+                       data.data.result?.pbr_model?.url;
+      
+      if (modelUrl) {
+        console.log("Task completed! Model URL:", modelUrl);
+        return modelUrl;
+      } else {
+        console.error("Success but no model URL found in response:", JSON.stringify(data.data));
+        throw new Error("Task succeeded but no model URL in response");
+      }
     }
 
     if (data.data.status === "failed") {
+      console.error("Task failed:", JSON.stringify(data.data));
       throw new Error("Tripo task failed");
     }
 
