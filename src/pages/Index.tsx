@@ -3,12 +3,14 @@ import HeroSection from "@/components/HeroSection";
 import ProductGrid from "@/components/ProductGrid";
 import ProductDetailModal from "@/components/ProductDetailModal";
 import ARViewer from "@/components/ARViewer";
+import RoomVisualizerModal from "@/components/RoomVisualizerModal";
 import type { Product } from "@/data/products";
 
 const Index = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isAROpen, setIsAROpen] = useState(false);
+  const [isVisualizerOpen, setIsVisualizerOpen] = useState(false);
 
   const handleViewDetails = (product: Product) => {
     setSelectedProduct(product);
@@ -58,7 +60,7 @@ const Index = () => {
       </header>
 
       {/* Hero */}
-      <HeroSection />
+      <HeroSection onOpenVisualizer={() => setIsVisualizerOpen(true)} />
 
       {/* Products */}
       <ProductGrid onViewDetails={handleViewDetails} onViewAR={handleViewAR} />
@@ -92,6 +94,11 @@ const Index = () => {
         product={selectedProduct}
         isOpen={isAROpen}
         onClose={handleCloseAR}
+      />
+
+      <RoomVisualizerModal
+        isOpen={isVisualizerOpen}
+        onClose={() => setIsVisualizerOpen(false)}
       />
     </main>
   );
