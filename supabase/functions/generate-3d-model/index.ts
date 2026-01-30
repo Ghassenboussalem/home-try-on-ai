@@ -29,7 +29,6 @@ interface TripoTaskStatus {
     progress: number;
     output?: {
       pbr_model?: string;
-      rendered_image?: string;
     };
     result?: {
       pbr_model?: {
@@ -38,6 +37,47 @@ interface TripoTaskStatus {
       };
     };
   };
+}
+
+async function checkCache(supabase: any, imageUrl: string): Promise<string | null> {
+  console.log("Checking cache for image:", imageUrl);
+  
+  const { data, error } = await supabase
+    .from("generated_models")
+    .select("model_url")
+    .eq("image_url", imageUrl)
+    .maybeSingle();
+  
+  if (error) {
+    console.error("Cache check error:", error);
+    return null;
+  }
+  
+  if (data) {
+    console.log("Cache hit! Model URL:", data.model_url);
+    return data.model_url;
+  }
+  
+  console.log("Cache miss");
+  return null;
+}
+
+async function saveToCache(supabase: any, imageUrl: string, modelUrl: string, taskId: string): Promise<void> {
+  console.log("Saving to cache:", { imageUrl, modelUrl, taskId });
+  
+  const { error } = await supabase
+    .from("generated_models")
+    .insert({
+      image_url: imageUrl,
+      model_url: modelUrl,
+      task_id: taskId,
+    });
+  
+  if (error) {
+    console.error("Cache save error:", error);
+  } else {
+    console.log("Saved to cache successfully");
+  }
 }
 
 async function fetchImageAsBlob(imageUrl: string): Promise<{ blob: Blob; fileType: string }> {
@@ -155,13 +195,11 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
         console.log("Task completed! Model URL:", modelUrl);
         return modelUrl;
       } else {
-        console.error("Success but no model URL found in response:", JSON.stringify(data.data));
         throw new Error("Task succeeded but no model URL in response");
       }
     }
 
     if (data.data.status === "failed") {
-      console.error("Task failed:", JSON.stringify(data.data));
       throw new Error("Tripo task failed - the image may not be suitable for 3D conversion");
     }
 
@@ -172,14 +210,12 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
 }
 
 async function downloadAndStoreModel(
-  supabaseUrl: string,
-  serviceRoleKey: string,
+  supabase: any,
   tripoModelUrl: string,
   taskId: string
 ): Promise<string> {
   console.log("Downloading GLB model from Tripo...");
   
-  // Fetch the GLB file from Tripo
   const response = await fetch(tripoModelUrl);
   if (!response.ok) {
     throw new Error(`Failed to download model: ${response.status}`);
@@ -188,10 +224,6 @@ async function downloadAndStoreModel(
   const modelBlob = await response.blob();
   console.log(`Model downloaded: ${modelBlob.size} bytes`);
   
-  // Create Supabase client with service role key
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
-  
-  // Upload to Supabase storage
   const fileName = `${taskId}.glb`;
   const { data, error } = await supabase.storage
     .from("3d-models")
@@ -207,7 +239,6 @@ async function downloadAndStoreModel(
   
   console.log("Model uploaded to storage:", data.path);
   
-  // Get public URL
   const { data: publicUrlData } = supabase.storage
     .from("3d-models")
     .getPublicUrl(fileName);
@@ -233,6 +264,8 @@ serve(async (req) => {
       throw new Error("Supabase credentials not configured");
     }
 
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
     const { imageUrl, productName } = await req.json();
     
     if (!imageUrl) {
@@ -244,6 +277,22 @@ serve(async (req) => {
 
     console.log(`Generating 3D model for: ${productName || "Unknown product"}`);
     console.log(`Image URL: ${imageUrl}`);
+
+    // Check cache first
+    const cachedModelUrl = await checkCache(supabase, imageUrl);
+    if (cachedModelUrl) {
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          modelUrl: cachedModelUrl,
+          cached: true,
+        }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
 
     // Step 1: Fetch the image
     const { blob, fileType } = await fetchImageAsBlob(imageUrl);
@@ -258,18 +307,17 @@ serve(async (req) => {
     const tripoModelUrl = await pollTaskStatus(TRIPO_API_KEY, taskId);
     
     // Step 5: Download GLB and store in Supabase storage
-    const publicModelUrl = await downloadAndStoreModel(
-      SUPABASE_URL,
-      SUPABASE_SERVICE_ROLE_KEY,
-      tripoModelUrl,
-      taskId
-    );
+    const publicModelUrl = await downloadAndStoreModel(supabase, tripoModelUrl, taskId);
+    
+    // Step 6: Save to cache
+    await saveToCache(supabase, imageUrl, publicModelUrl, taskId);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         modelUrl: publicModelUrl,
         taskId,
+        cached: false,
       }),
       { 
         status: 200, 
