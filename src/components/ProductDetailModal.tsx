@@ -33,7 +33,7 @@ const ProductDetailModal = ({ product, isOpen, onClose, onViewAR }: ProductDetai
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed inset-4 md:inset-auto md:top-[5vh] md:left-1/2 md:-translate-x-1/2 md:max-w-5xl md:w-[calc(100%-2rem)] md:max-h-[90vh] bg-card rounded-3xl shadow-2xl z-50 overflow-hidden"
+            className="fixed inset-4 md:inset-0 md:m-auto md:max-w-5xl md:w-[calc(100%-4rem)] md:h-fit md:max-h-[90vh] bg-card rounded-3xl shadow-2xl z-50 overflow-hidden"
           >
             {/* Close button */}
             <button
