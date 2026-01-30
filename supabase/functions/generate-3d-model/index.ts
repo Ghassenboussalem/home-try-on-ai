@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,7 +51,6 @@ async function fetchImageAsBlob(imageUrl: string): Promise<{ blob: Blob; fileTyp
   const contentType = response.headers.get("content-type") || "image/jpeg";
   const blob = await response.blob();
   
-  // Determine file type from content-type
   let fileType = "jpg";
   if (contentType.includes("png")) {
     fileType = "png";
@@ -148,7 +148,6 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
     console.log(`Task status (attempt ${attempt + 1}):`, data.data.status, data.data.progress);
 
     if (data.data.status === "success") {
-      // Try different paths for the model URL based on API response structure
       const modelUrl = data.data.output?.pbr_model || 
                        data.data.result?.pbr_model?.url;
       
@@ -166,24 +165,72 @@ async function pollTaskStatus(apiKey: string, taskId: string, maxAttempts = 60):
       throw new Error("Tripo task failed - the image may not be suitable for 3D conversion");
     }
 
-    // Wait 3 seconds before next poll
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
   throw new Error("Task timed out after maximum attempts");
 }
 
+async function downloadAndStoreModel(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  tripoModelUrl: string,
+  taskId: string
+): Promise<string> {
+  console.log("Downloading GLB model from Tripo...");
+  
+  // Fetch the GLB file from Tripo
+  const response = await fetch(tripoModelUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download model: ${response.status}`);
+  }
+  
+  const modelBlob = await response.blob();
+  console.log(`Model downloaded: ${modelBlob.size} bytes`);
+  
+  // Create Supabase client with service role key
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+  
+  // Upload to Supabase storage
+  const fileName = `${taskId}.glb`;
+  const { data, error } = await supabase.storage
+    .from("3d-models")
+    .upload(fileName, modelBlob, {
+      contentType: "model/gltf-binary",
+      upsert: true,
+    });
+  
+  if (error) {
+    console.error("Storage upload error:", error);
+    throw new Error(`Failed to upload model to storage: ${error.message}`);
+  }
+  
+  console.log("Model uploaded to storage:", data.path);
+  
+  // Get public URL
+  const { data: publicUrlData } = supabase.storage
+    .from("3d-models")
+    .getPublicUrl(fileName);
+  
+  console.log("Public URL:", publicUrlData.publicUrl);
+  return publicUrlData.publicUrl;
+}
+
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   try {
     const TRIPO_API_KEY = Deno.env.get("TRIPO_API_KEY");
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    
     if (!TRIPO_API_KEY) {
-      console.error("TRIPO_API_KEY not configured");
       throw new Error("TRIPO_API_KEY is not configured");
+    }
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error("Supabase credentials not configured");
     }
 
     const { imageUrl, productName } = await req.json();
@@ -208,12 +255,20 @@ serve(async (req) => {
     const taskId = await createTripoTask(TRIPO_API_KEY, imageToken, fileType);
     
     // Step 4: Poll for completion
-    const modelUrl = await pollTaskStatus(TRIPO_API_KEY, taskId);
+    const tripoModelUrl = await pollTaskStatus(TRIPO_API_KEY, taskId);
+    
+    // Step 5: Download GLB and store in Supabase storage
+    const publicModelUrl = await downloadAndStoreModel(
+      SUPABASE_URL,
+      SUPABASE_SERVICE_ROLE_KEY,
+      tripoModelUrl,
+      taskId
+    );
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        modelUrl,
+        modelUrl: publicModelUrl,
         taskId,
       }),
       { 
