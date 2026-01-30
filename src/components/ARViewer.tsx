@@ -233,7 +233,6 @@ const ARViewer = ({ product, isOpen, onClose }: ARViewerProps) => {
 
             {status === "ready" && modelUrl && (
               <>
-
                 <model-viewer
                   ref={modelViewerRef}
                   src={modelUrl}
@@ -247,7 +246,24 @@ const ARViewer = ({ product, isOpen, onClose }: ARViewerProps) => {
                   environment-image="neutral"
                   exposure="1"
                   style={{ width: "100%", height: "100%" }}
-                />
+                >
+                  {/* Hidden slot for native AR button */}
+                  <button slot="ar-button" style={{ display: "none" }} />
+                </model-viewer>
+
+                {/* Prominent AR Button */}
+                <button
+                  onClick={() => {
+                    const modelViewer = modelViewerRef.current as any;
+                    if (modelViewer?.activateAR) {
+                      modelViewer.activateAR();
+                    }
+                  }}
+                  className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-full font-medium shadow-lg hover:opacity-90 transition-opacity animate-pulse"
+                >
+                  <Camera className="w-5 h-5" />
+                  Place in Your Room
+                </button>
 
                 {/* AR Instructions */}
                 <div className="absolute bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 bg-foreground/80 text-background rounded-full text-sm">
