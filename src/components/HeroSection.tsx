@@ -1,7 +1,11 @@
-import { Smartphone, Camera, Share2 } from "lucide-react";
+import { Smartphone, Camera, Share2, Wand2 } from "lucide-react";
 import { motion } from "framer-motion";
 
-const HeroSection = () => {
+interface HeroSectionProps {
+  onOpenVisualizer?: () => void;
+}
+
+const HeroSection = ({ onOpenVisualizer }: HeroSectionProps) => {
   const scrollToProducts = () => {
     document.getElementById("products")?.scrollIntoView({ behavior: "smooth" });
   };
@@ -59,8 +63,12 @@ const HeroSection = () => {
             >
               Explore Collection
             </button>
-            <button className="px-8 py-4 bg-secondary text-secondary-foreground rounded-full font-medium text-lg hover:bg-secondary/80 transition-all duration-300">
-              How It Works
+            <button 
+              onClick={onOpenVisualizer}
+              className="px-8 py-4 bg-secondary text-secondary-foreground rounded-full font-medium text-lg hover:bg-secondary/80 transition-all duration-300 flex items-center gap-2"
+            >
+              <Wand2 className="w-5 h-5" />
+              AI Room Visualizer
             </button>
           </motion.div>
 
