@@ -2,3 +2,9 @@ project_id = "mwwdtvbcxxipkojgpfat"
 
 [functions.generate-3d-model]
 verify_jwt = false
+
+[functions.ai-room-stylist]
+verify_jwt = false
+
+[functions.smart-recommendations]
+verify_jwt = false
